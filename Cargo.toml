@@ -1,9 +1,11 @@
 [package]
-name = "bakmerge"
-version = "0.1.0"
 authors = ["smudge <nathan@ngriffith.com>"]
+description = "A CLI for merging multiple backups into a single, consolidated folder."
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT OR Apache-2.0"
+name = "bakmerge"
+readme = "README.md"
+repository = "https://github.com/smudge/bakmerge"
+version = "0.1.0"
 
 [dependencies]
