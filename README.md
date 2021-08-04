@@ -6,14 +6,17 @@ If you find yourself with a bunch of disorganized backups, with files
 duplicated many times over, `bakmerge` can help you merge them all into one
 place.
 
+**WARNING: This is an experimental tool that _will_ delete files.** Use at your
+own risk!
+
 ### Why?
 
 I made `bakmerge` to help me merge many years of external hard drive backups
 onto a single, network-attached storage device with a newly-organized folder
 structure. In other words, I had folder after folder with names like
 `mac_backup_3/` and `desktop 1-1-2015/`, and I wanted to de-duplicate and
-re-organize all files contained within, so that I could delete the backups
-and get rid of the hard drives.
+re-organize all files contained within, so that I could delete the backups and
+get rid of the hard drives. (My NAS manages its own backups to cloud storage!)
 
 In order to do this, I needed to be sure that I wasn't deleting anything that
 wasn't already on my storage server. So I made sure that `bakmerge` is able
@@ -56,22 +59,23 @@ $ bakmerge -t /path/to/target_folder -s /path/to/source_folders
 
 Initially, `bakmerge` will build a database of files and checksums. **This may
 take a long time**, but is fully resume-able and need only be incrementally
-updated afterwards. By default, the database is stored in your home/user
-directory under `.bakmerge/`.
+updated once performed once. By default, the database is stored in your
+home/user directory under `.bakmerge/`.
 
-As files are processed, `backmerge` will begin prompting you with choices.
+After all files are processed, `backmerge` will prompt you with choices.
 
-- When a duplicate file is detected, you may:
-  - Press `D` or `K` to either (D)elete or (K)eep a duplicate file that exists
-    in source.
-- When a duplicate file has an older timestamp than the copy in the "target"
-  folder, you may:
-  - Press `W` or `K` to either (W)rite an older "created at" timestamp to a
-    target file, or (K)eep the existing timestamp.
+- When a duplicate file (or _an entire folder consisting of duplicate files_)
+  is detected, you may:
+  - Press `D` or `K` to either (D)elete or (K)eep the source file(s).
+  - Press `E` to (E)nter the folder and choose on a per-file basis.
+- When a duplicate source file has an older "created at" timestamp than the
+  target copy, you may:
+  - Press `W` or `K` to either (W)rite the older timestamp to the
+    target, or (K)eep the existing timestamp.
 - When a similar file is detected (similar content and/or similar containing
   folder and name):
-  - Press `P` or `S` to either write a (P)atch file, or (S)kip to the next
-    file.
+  - Press `W` or `S` to either (W)rite a patch file to a `.versions` folder in
+    the target, or (S)kip the file.
 
 ## Installing
 
