@@ -9,3 +9,4 @@ repository = "https://github.com/smudge/bakmerge"
 version = "0.1.0"
 
 [dependencies]
+getopts = "0.2"
