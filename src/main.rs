@@ -1,6 +1,8 @@
 extern crate getopts;
+extern crate spinner;
 
 use getopts::Options;
+use spinner::{SpinnerBuilder, SpinnerHandle};
 use std::env;
 use std::fs;
 use std::io;
@@ -42,21 +44,29 @@ fn main() {
 }
 
 fn run(source: &Path, target: &Path) {
-    let source_count = count_files(source, 0);
-    let target_count = count_files(target, 0);
-    println!("source: {}", source_count.unwrap());
-    println!("target: {}", target_count.unwrap());
+    let sp = SpinnerBuilder::new("Discovering source files... (0)".into()).start();
+    let source_count = count_files(source, 0, &sp, "Discovering source files...");
+    sp.update("Discovering target files... (0)".into());
+    let target_count = count_files(target, 0, &sp, "Discovering target files...");
+    sp.update(" ".into());
+    sp.close();
+    println!(
+        "source: {}, target: {}",
+        source_count.unwrap(),
+        target_count.unwrap()
+    );
 }
 
-fn count_files(dir: &Path, mut count: u64) -> io::Result<u64> {
+fn count_files(dir: &Path, mut count: u64, sp: &SpinnerHandle, prefix: &str) -> io::Result<u64> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            count = count_files(&path, count)?;
+            count = count_files(&path, count, sp, prefix)?;
         } else if path.is_file() {
             count += 1;
         }
     }
+    sp.update(format!("{} ({})", prefix, count));
     Ok(count)
 }
