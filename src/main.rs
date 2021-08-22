@@ -1,12 +1,18 @@
+extern crate data_encoding;
 extern crate getopts;
+extern crate ring;
 extern crate spinner;
 
+use data_encoding::HEXLOWER;
 use getopts::Options;
+use ring::digest::{Context, Digest, SHA256};
 use spinner::{SpinnerBuilder, SpinnerHandle};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::fs::File;
 use std::io;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 fn print_usage(opts: Options) {
@@ -53,7 +59,8 @@ fn run(source: &Path, target: &Path) {
         &sp,
         "Discovering source files...",
         &mut files_by_size,
-    );
+    )
+    .unwrap();
     sp.update("Discovering target files... (0)".into());
     let target_count = count_files(
         target,
@@ -61,21 +68,57 @@ fn run(source: &Path, target: &Path) {
         &sp,
         "Discovering target files...",
         &mut files_by_size,
-    );
-    sp.update(" ".into());
-    sp.close();
-    println!(
-        "source: {}, target: {}",
-        source_count.unwrap(),
-        target_count.unwrap()
-    );
-    println!("Files by size:");
+    )
+    .unwrap();
+    sp.message(format!(
+        "Discovered {} files ({} source, {} target)",
+        source_count + target_count,
+        source_count,
+        target_count
+    ));
+    let mut files_by_sum: HashMap<String, Vec<PathBuf>> = HashMap::new();
     for key in files_by_size.keys() {
-        let count = files_by_size.get(key).unwrap().len();
-        if count > 1 {
-            println!("{}: {}", key, count);
+        let files = files_by_size.get(key).unwrap();
+        if files.len() > 1 {
+            for path in files {
+                sp.update(format!("{}", path.to_string_lossy()));
+                let file = File::open(path).unwrap();
+                let reader = BufReader::new(file);
+                let digest = sha256_digest(reader).unwrap();
+                let sum = HEXLOWER.encode(digest.as_ref());
+                if !files_by_sum.contains_key(&sum) {
+                    files_by_sum.insert(sum.clone(), Vec::new());
+                }
+                let list = files_by_sum.get_mut(&sum).unwrap();
+                list.push(path.clone());
+            }
         }
     }
+    sp.close();
+    for key in files_by_sum.keys() {
+        let files = files_by_sum.get(key).unwrap();
+        if files.len() > 1 {
+            println!("{}: {}", key, files.len());
+            for file in files {
+                println!("↳{}", file.to_string_lossy());
+            }
+        }
+    }
+}
+
+fn sha256_digest<R: Read>(mut reader: R) -> io::Result<Digest> {
+    let mut context = Context::new(&SHA256);
+    let mut buffer = [0; 1024];
+
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        context.update(&buffer[..count]);
+    }
+
+    Ok(context.finish())
 }
 
 fn count_files(
@@ -98,8 +141,8 @@ fn count_files(
             let list = files_by_size.get_mut(&size).unwrap();
             list.push(path.clone());
             count += 1;
+            sp.update(format!("{} ({})", prefix, count));
         }
     }
-    sp.update(format!("{} ({})", prefix, count));
     Ok(count)
 }
