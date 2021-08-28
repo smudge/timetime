@@ -77,11 +77,12 @@ fn run(source: &Path, target: &Path) {
         target_count
     ));
     let mut files_by_sum: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    for key in files_by_size.keys() {
+    let count = files_by_size.keys().count();
+    for (i, key) in files_by_size.keys().enumerate() {
         let files = files_by_size.get(key).unwrap();
         if files.len() > 1 {
             for path in files {
-                sp.update(format!("{}", path.to_string_lossy()));
+                sp.update(format!("Hashing files ({}/{})", i, count));
                 let file = File::open(path).unwrap();
                 let reader = BufReader::new(file);
                 let digest = sha256_digest(reader).unwrap();
