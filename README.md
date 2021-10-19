@@ -1,88 +1,94 @@
-# bakmerge
+# timetime
 
-> A CLI for merging multiple backups into a single, consolidated folder.
+> A CLI for repairing timestamp metadata of file copies/duplicates
 
-If you find yourself with a bunch of disorganized backups, with files
-duplicated many times over, `bakmerge` can help you merge them all into one
-place.
+## Basic Usage
 
-**WARNING: This is an experimental tool that _will_ delete files.** Use at your
-own risk!
-
-### Why?
-
-I made `bakmerge` to help me merge many years of external hard drive backups
-onto a single, network-attached storage device with a newly-organized folder
-structure. In other words, I had folder after folder with names like
-`mac_backup_3/` and `desktop 1-1-2015/`, and I wanted to de-duplicate and
-re-organize all files contained within, so that I could delete the backups and
-get rid of the hard drives. (My NAS manages its own backups to cloud storage!)
-
-In order to do this, I needed to be sure that I wasn't deleting anything that
-wasn't already on my storage server. So I made sure that `bakmerge` is able
-to:
-
-- Detect similar/duplicate files/folders, recursively.
-- Manage file timestamps sensibly and uncover the most truthful values.
-- Compare folder structures and detect missing or corrupt files.
-- Store alternate versions of files as smaller, delta/patch files.
-- Surface interactive prompts whenever a choice is ambiguous.
-
-## How it Works
-
-Bakmerge assumes that you have one or more source folders, and that your aim is
-to merge them all into a single target folder hierarchy.
-
-It is recommended that you first set up your "target" folder by moving one copy
-of as many files as you can find into your desired organization system. An
-empty "target" is of little use, but a fully organized "target" will allow you
-to quickly clear out your source folders! Your "target" could even be your most
-recent backup!
-
-The goal will be to detect and delete files from the source folders that are
-known to exist in the target. You'll also have an opportunity to consolidate
-alternate versions of files into an adjacent `.versions` folder. Plus, if
-duplicate files have inconsistent timestamps but are otherwise 100% identical,
-you'll have the option to apply the earliest "created at" timestamp to the copy
-in your target folder.
-
-In the end, your "source" folders should be left containing only files that
-do not (yet) exist in "target" and can be manually incorporated if desired.
-
-## Usage
-
-Running the `bakmerge` command will begin an interactive session:
+When given two or more files, `timetime` will compare their timestamps and
+"repair" them to whichever value is the earliest:
 
 ```bash
-$ bakmerge -t /path/to/target_folder -s /path/to/source_folders
+timetime my-file.txt backups/my-file.txt
 ```
 
-Initially, `bakmerge` will build a database of files and checksums. **This may
-take a long time**, but is fully resume-able and need only be incrementally
-updated once performed once. By default, the database is stored in your
-home/user directory under `.bakmerge/`.
+By default, **the files must have identical checksums**, because it assumes
+that they are copies. If not, a warning will be produced and the operation will
+fail. This can be circumvented with the `--force` or `-f` option:
 
-After all files are processed, `backmerge` will prompt you with choices.
+```bash
+timetime -f file-1 file-2 file-3
+```
 
-- When a duplicate file (or _an entire folder consisting of duplicate files_)
-  is detected, you may:
-  - Press `D` or `K` to either (D)elete or (K)eep the source file(s).
-  - Press `E` to (E)nter the folder and choose on a per-file basis.
-- When a duplicate source file has an older "created at" timestamp than the
-  target copy, you may:
-  - Press `W` or `K` to either (W)rite the older timestamp to the
-    target, or (K)eep the existing timestamp.
-- When a similar file is detected (similar content and/or similar containing
-  folder and name):
-  - Press `W` or `S` to either (W)rite a patch file to a `.versions` folder in
-    the target, or (S)kip the file.
+Use with caution, as this will blindly overwrite any number of timestamps!
+
+#### "Modified" vs "Created"
+
+By default, `timetime` will compare both `mtime` ("modified at") and, on
+supported systems, `btime` ("created at").
+
+To compare only the "modified" timestamp, use the `--mtime` flag:
+
+```bash
+timetime --mtime file-1 file-2
+```
+
+_Note that some filesystems will prevent a file's "created at" from being after
+its "modified at" by automatically setting `btime` to match `mtime`._
+
+#### Comparison strategy
+
+When supplied with multiple files, `timetime` can be configured to use the
+newest timestamps, rather than the oldest:
+
+```bash
+timetime file-1 file-2 --strategy newest
+```
+
+This can be useful in situations where a set of files are known to be in the
+wrong timezone, or to have had their timestamp metadata damaged in some other
+way.
+
+#### Timezone safety
+
+As a special feature, `timetime` will detect if the files' timestamps are off
+by an _exact_ number of hours. If this is the case, it will output a warning:
+
+```
+Warning: file1 and file2 may have matching timestamps from different timezones
+```
+
+Due to the risk of false positives, this warning will not halt execution,
+unless an extra `--tz-safety` parameter is supplied:
+
+```bash
+timetime file-1 file-2 --tz-safety
+```
+
+### Usage with `rmlint`
+
+The `timetime` command is intended to be used as part of a more complex file
+consolidation and/or deletion script, such as one produced by `rmlint`.
+
+For example, prior to removing a duplicate file, it may make sense to "correct"
+the timestamps of the files, to preserve the oldest modified/created
+timestamps. This can be done by supplying a custom removal command to `rmlint`:
+
+```bash
+rmlint -o sh -c sh:cmd='timetime --tz-safety "$1" "$2" && rm "$1"' --keep-all-tagged --must-match-tagged -T df /media/backup // /media/original
+```
+
+The above command will detect files in `/media/backup` that are identical to
+files in `/media/original`, then "repair" timestamps across both the backup and
+the original, _and then_ (only if that succeeds) remove the duplicate file.
+
+**As always, be sure to test operations carefully before removing files en masse!**
 
 ## Installing
 
 ### via Homebrew
 
 ```
-brew install smudge/smudge/bakmerge
+brew install smudge/smudge/timetime
 ```
 
 ### via Cargo
@@ -91,12 +97,13 @@ brew install smudge/smudge/bakmerge
 and install from crates.io by running:
 
 ```
-cargo install bakmerge
+cargo install timetime
 ```
 
 ## Thanks To:
 
-* Carol Nichols and Steve Klabnik for the [official book](https://doc.rust-lang.org/book/) on Rust
+* The maintainers of `rmlint` for such a reliable and well-documented project
+* Carol Nichols and Steve Klabnik for the [official book](https://doc.rust-lang.org/book/)
 
 ## Contributing
 

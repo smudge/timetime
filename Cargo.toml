@@ -1,11 +1,11 @@
 [package]
 authors = ["smudge <nathan@ngriffith.com>"]
-description = "A CLI for merging multiple backups into a single, consolidated folder."
+description = "A CLI for repairing timestamp metadata of file copies 🕛🕧🕐🕜🕑🕝🕒"
 edition = "2018"
 license = "MIT OR Apache-2.0"
-name = "bakmerge"
+name = "timetime"
 readme = "README.md"
-repository = "https://github.com/smudge/bakmerge"
+repository = "https://github.com/smudge/timetime"
 version = "0.1.0"
 
 [dependencies]

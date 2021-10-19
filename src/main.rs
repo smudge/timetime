@@ -20,13 +20,14 @@ fn print_usage(opts: Options) {
     println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     println!("  {}\n", env!("CARGO_PKG_DESCRIPTION"));
     println!("Usage:");
-    print!("  {} -s SOURCE -t TARGET{}", args[0], opts.usage(""));
+    print!("  {} [opts] file-1 file-2{}", args[0], opts.usage(""));
 }
 
 fn main() {
     let mut opts = Options::new();
-    opts.optopt("t", "target", "target directory", "TARGET");
-    opts.optopt("s", "source", "source directory (for deletion!)", "SOURCE");
+    opts.optopt("s", "strategy", "oldest (default) or newest", "VAL");
+    opts.optflag("t", "tz-safety", "halt if timezones match");
+    opts.optflag("m", "mtime", "only compare 'modified' timestamp");
     opts.optflag("h", "help", "this help message");
 
     let args: Vec<String> = env::args().collect();

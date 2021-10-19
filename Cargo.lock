@@ -9,16 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30275ad0ad84ec1c06dde3b3f7d23c6006b7d76d61a85e7060b426b747eff70d"
 
 [[package]]
-name = "bakmerge"
-version = "0.1.0"
-dependencies = [
- "data-encoding",
- "getopts",
- "ring",
- "spinner",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -218,6 +208,16 @@ checksum = "c0863a3345e70f61d613eab32ee046ccd1bcc5f9105fe402c61fcd0c13eeb8b5"
 dependencies = [
  "dirs",
  "winapi",
+]
+
+[[package]]
+name = "timetime"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "getopts",
+ "ring",
+ "spinner",
 ]
 
 [[package]]
