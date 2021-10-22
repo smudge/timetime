@@ -1,17 +1,18 @@
 # timetime
 
-> A CLI for repairing timestamp metadata of file copies/duplicates
+> A CLI for repairing timestamp metadata of file copies 🕛🕧🕐🕜🕑🕝🕒
 
 ## Basic Usage
 
-When given two or more files, `timetime` will compare their created/modified
-timestamps and "repair" them all to match whichever values are the earliest:
+When given two or more files, `timetime` will cross-check their
+created/modified timestamps and 💅 repair ✨ each file's timestamp metadata to
+match whichever values are the earliest:
 
 ```bash
 timetime my-file.txt backups/my-file.txt
 ```
 
-By default, **the files must have identical checksums**, because it assumes
+By default, **🚨the files must have identical checksums🚨**, because it assumes
 that they are copies. If not, a warning will be produced and the operation will
 fail. This can be circumvented with the `--force` or `-f` option:
 
@@ -19,7 +20,7 @@ fail. This can be circumvented with the `--force` or `-f` option:
 timetime --force file-1 file-2 file-3
 ```
 
-Use with caution, as this will blindly overwrite any number of timestamps!
+⚠️Use with caution⚠️, as this will blindly overwrite any number of timestamps!
 
 #### "Modified" vs "Created"
 
