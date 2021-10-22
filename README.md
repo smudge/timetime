@@ -4,8 +4,8 @@
 
 ## Basic Usage
 
-When given two or more files, `timetime` will compare their timestamps and
-"repair" them to whichever value is the earliest:
+When given two or more files, `timetime` will compare their created/modified
+timestamps and "repair" them all to match whichever values are the earliest:
 
 ```bash
 timetime my-file.txt backups/my-file.txt
@@ -16,7 +16,7 @@ that they are copies. If not, a warning will be produced and the operation will
 fail. This can be circumvented with the `--force` or `-f` option:
 
 ```bash
-timetime -f file-1 file-2 file-3
+timetime --force file-1 file-2 file-3
 ```
 
 Use with caution, as this will blindly overwrite any number of timestamps!
@@ -26,7 +26,7 @@ Use with caution, as this will blindly overwrite any number of timestamps!
 By default, `timetime` will compare both `mtime` ("modified at") and, on
 supported systems, `btime` ("created at").
 
-To compare only the "modified" timestamp, use the `--mtime` flag:
+To compare only the "modified" timestamp, use the `--mtime` or `-m` flag:
 
 ```bash
 timetime --mtime file-1 file-2
@@ -41,7 +41,7 @@ When supplied with multiple files, `timetime` can be configured to use the
 newest timestamps, rather than the oldest:
 
 ```bash
-timetime file-1 file-2 --strategy newest
+timetime --strategy newest file-1 file-2
 ```
 
 This can be useful in situations where a set of files are known to be in the
