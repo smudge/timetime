@@ -1,26 +1,25 @@
 extern crate data_encoding;
+extern crate filetime;
 extern crate getopts;
 extern crate ring;
-extern crate spinner;
 
 use data_encoding::HEXLOWER;
+use filetime::FileTime;
 use getopts::Options;
 use ring::digest::{Context, Digest, SHA256};
-use spinner::{SpinnerBuilder, SpinnerHandle};
-use std::collections::HashMap;
 use std::env;
-use std::fs;
-use std::fs::File;
+use std::fs::{self, File, Metadata};
 use std::io;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 fn print_usage(opts: Options) {
     let args: Vec<String> = env::args().collect();
     println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     println!("  {}\n", env!("CARGO_PKG_DESCRIPTION"));
     println!("Usage:");
-    print!("  {} [opts] file-1 file-2{}", args[0], opts.usage(""));
+    print!("  {} [opts] file file [file...]{}", args[0], opts.usage(""));
 }
 
 fn main() {
@@ -28,84 +27,58 @@ fn main() {
     opts.optopt("s", "strategy", "oldest (default) or newest", "VAL");
     opts.optflag("t", "tz-safety", "halt if timezones match");
     opts.optflag("m", "mtime", "only compare 'modified' timestamp");
+    opts.optflag("f", "force", "ignore checksum differences");
     opts.optflag("h", "help", "this help message");
 
     let args: Vec<String> = env::args().collect();
     let matches = opts.parse(&args[1..]).unwrap();
 
     match (
+        matches.free.get(0),
+        matches.free.get(1),
         matches.opt_str("s"),
-        matches.opt_str("t"),
+        matches.opt_present("m"),
+        matches.opt_present("t"),
+        matches.opt_present("f"),
         matches.opt_present("h"),
     ) {
-        (Some(s), Some(t), false) if Path::new(&s).is_dir() && Path::new(&t).is_dir() => {
-            run(Path::new(&s), Path::new(&t))
-        }
-        (Some(s), Some(_), false) if !Path::new(&s).is_dir() => {
-            eprintln!("Unable to find source dir: {}", s)
-        }
-        (Some(_), Some(t), false) if !Path::new(&t).is_dir() => {
-            eprintln!("Unable to find target dir: {}", t)
-        }
-        (_, _, _) => print_usage(opts),
+        (Some(_), Some(_), s, m, t, f, false) => run(matches.free, s, m, f, t),
+        (_, _, _, _, _, _, _) => print_usage(opts),
     }
 }
 
-fn run(source: &Path, target: &Path) {
-    let mut files_by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
-    let sp = SpinnerBuilder::new("Discovering source files... (0)".into()).start();
-    let source_count = count_files(
-        source,
-        0,
-        &sp,
-        "Discovering source files...",
-        &mut files_by_size,
-    )
-    .unwrap();
-    sp.update("Discovering target files... (0)".into());
-    let target_count = count_files(
-        target,
-        0,
-        &sp,
-        "Discovering target files...",
-        &mut files_by_size,
-    )
-    .unwrap();
-    sp.message(format!(
-        "Discovered {} files ({} source, {} target)",
-        source_count + target_count,
-        source_count,
-        target_count
-    ));
-    let mut files_by_sum: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    let count = files_by_size.keys().count();
-    for (i, key) in files_by_size.keys().enumerate() {
-        let files = files_by_size.get(key).unwrap();
-        if files.len() > 1 {
-            for path in files {
-                sp.update(format!("Hashing files ({}/{})", i, count));
-                let file = File::open(path).unwrap();
-                let reader = BufReader::new(file);
-                let digest = sha256_digest(reader).unwrap();
-                let sum = HEXLOWER.encode(digest.as_ref());
-                if !files_by_sum.contains_key(&sum) {
-                    files_by_sum.insert(sum.clone(), Vec::new());
-                }
-                let list = files_by_sum.get_mut(&sum).unwrap();
-                list.push(path.clone());
+fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) {
+    let paths: Vec<PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
+    let mut checksums: Vec<String> = paths.iter().map(|path| checksum(path.as_path())).collect();
+    checksums.dedup();
+    if checksums.len() != 1 && !force {
+        eprintln!("File checksums do not match! Cancelling operation...");
+    } else {
+        let metadata: Vec<Metadata> = paths
+            .iter()
+            .map(|path| fs::metadata(path).unwrap())
+            .collect();
+        if !mtime {
+            let createds: Vec<SystemTime> = metadata.iter().map(|m| m.created().unwrap()).collect();
+            let min_created = FileTime::from_system_time(createds.iter().min().unwrap().clone());
+            for path in paths.iter() {
+                filetime::set_file_mtime(&path, min_created).unwrap(); // Setting mtime to created will update btime so that btime <= mtime
             }
         }
-    }
-    sp.close();
-    for key in files_by_sum.keys() {
-        let files = files_by_sum.get(key).unwrap();
-        if files.len() > 1 {
-            println!("{}: {}", key, files.len());
-            for file in files {
-                println!("↳{}", file.to_string_lossy());
-            }
+
+        let modifieds: Vec<SystemTime> = metadata.iter().map(|m| m.modified().unwrap()).collect();
+        let min_modified = FileTime::from_system_time(modifieds.iter().min().unwrap().clone());
+        for path in paths.iter() {
+            filetime::set_file_mtime(&path, min_modified).unwrap();
         }
     }
+}
+
+fn checksum(path: &Path) -> String {
+    let file = File::open(path).unwrap();
+    let reader = BufReader::new(file);
+    let digest = sha256_digest(reader).unwrap();
+    HEXLOWER.encode(digest.as_ref())
 }
 
 fn sha256_digest<R: Read>(mut reader: R) -> io::Result<Digest> {
@@ -121,30 +94,4 @@ fn sha256_digest<R: Read>(mut reader: R) -> io::Result<Digest> {
     }
 
     Ok(context.finish())
-}
-
-fn count_files(
-    dir: &Path,
-    mut count: u64,
-    sp: &SpinnerHandle,
-    prefix: &str,
-    files_by_size: &mut HashMap<u64, Vec<PathBuf>>,
-) -> io::Result<u64> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            count = count_files(&path, count, sp, prefix, files_by_size)?;
-        } else if path.is_file() {
-            let size = fs::metadata(path.clone())?.len();
-            if !files_by_size.contains_key(&size) {
-                files_by_size.insert(size, Vec::new());
-            }
-            let list = files_by_size.get_mut(&size).unwrap();
-            list.push(path.clone());
-            count += 1;
-            sp.update(format!("{} ({})", prefix, count));
-        }
-    }
-    Ok(count)
 }
