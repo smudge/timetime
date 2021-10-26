@@ -55,7 +55,7 @@ As a special feature, `timetime` will detect if the files' timestamps are off
 by an _exact_ number of hours. If this is the case, it will output a warning:
 
 ```
-Warning: file1 and file2 may have matching timestamps from different timezones
+Warning: files may have matching timestamps from different timezones
 ```
 
 Due to the risk of false positives, this warning will not halt execution,

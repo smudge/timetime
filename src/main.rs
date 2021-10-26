@@ -59,19 +59,50 @@ fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, t
             .map(|path| fs::metadata(path).unwrap())
             .collect();
         if !mtime {
-            let createds: Vec<SystemTime> = metadata.iter().map(|m| m.created().unwrap()).collect();
-            let min_created = FileTime::from_system_time(createds.iter().min().unwrap().clone());
+            let min_created = get_min_time(&metadata, tzsafety, |m| m.created());
             for path in paths.iter() {
                 filetime::set_file_mtime(&path, min_created).unwrap(); // Setting mtime to created will update btime so that btime <= mtime
             }
         }
 
-        let modifieds: Vec<SystemTime> = metadata.iter().map(|m| m.modified().unwrap()).collect();
-        let min_modified = FileTime::from_system_time(modifieds.iter().min().unwrap().clone());
+        let min_modified = get_min_time(&metadata, tzsafety, |m| m.modified());
         for path in paths.iter() {
             filetime::set_file_mtime(&path, min_modified).unwrap();
         }
     }
+}
+
+fn get_min_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
+    metadata: &Vec<Metadata>,
+    tzsafety: bool,
+    f: F,
+) -> FileTime {
+    let times = metadata
+        .iter()
+        .map(|m| f(m).unwrap())
+        .collect::<Vec<SystemTime>>();
+    if tz_check(&times) {
+        if tzsafety {
+            panic!("Timezone Safety Check Failed! Files may have matching timestamps from different timezones.")
+        } else {
+            eprintln!("Warning: files may have matching timestamps from different timezones");
+        }
+    }
+    FileTime::from_system_time(times.iter().min().unwrap().clone())
+}
+
+fn tz_check(times: &Vec<SystemTime>) -> bool {
+    let mut times = times.clone();
+    times.sort();
+    let mut left = times.clone();
+    let mut right = times.clone();
+    left.remove(right.len() - 1);
+    right.remove(0);
+    let mut deltas = left
+        .iter()
+        .zip(right.iter())
+        .map(|(l, r)| r.duration_since(l.clone()).unwrap());
+    deltas.any(|dur| dur.as_secs() > 0 && dur.subsec_nanos() == 0 && dur.as_secs() % 3600 == 0)
 }
 
 fn checksum(path: &Path) -> String {
