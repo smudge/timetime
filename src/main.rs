@@ -58,23 +58,27 @@ fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, t
             .iter()
             .map(|path| fs::metadata(path).unwrap())
             .collect();
+        let modified = get_canonical_time(&metadata, tzsafety, strategy.clone(), |m| m.modified());
         if !mtime {
-            let min_created = get_min_time(&metadata, tzsafety, |m| m.created());
+            let created = get_canonical_time(&metadata, tzsafety, strategy, |m| m.created());
+            if created > modified {
+                panic!("Canonical creation time cannot be after modified time");
+            }
             for path in paths.iter() {
-                filetime::set_file_mtime(&path, min_created).unwrap(); // Setting mtime to created will update btime so that btime <= mtime
+                filetime::set_file_mtime(&path, created).unwrap(); // Setting mtime to created will update btime so that btime <= mtime
             }
         }
 
-        let min_modified = get_min_time(&metadata, tzsafety, |m| m.modified());
         for path in paths.iter() {
-            filetime::set_file_mtime(&path, min_modified).unwrap();
+            filetime::set_file_mtime(&path, modified).unwrap();
         }
     }
 }
 
-fn get_min_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
+fn get_canonical_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
     metadata: &Vec<Metadata>,
     tzsafety: bool,
+    strategy: Option<String>,
     f: F,
 ) -> FileTime {
     let times = metadata
@@ -88,7 +92,12 @@ fn get_min_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
             eprintln!("Warning: files may have matching timestamps from different timezones");
         }
     }
-    FileTime::from_system_time(times.iter().min().unwrap().clone())
+    match strategy {
+        Some(w) if w == "newest".to_string() => {
+            FileTime::from_system_time(times.iter().max().unwrap().clone())
+        }
+        _ => FileTime::from_system_time(times.iter().min().unwrap().clone()),
+    }
 }
 
 fn tz_check(times: &Vec<SystemTime>) -> bool {
