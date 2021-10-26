@@ -86,12 +86,6 @@ the original, _and then_ (only if that succeeds) remove the duplicate file.
 
 ## Installing
 
-### via Homebrew
-
-```
-brew install smudge/smudge/timetime
-```
-
 ### via Cargo
 
 [Set up Rust/Cargo](https://doc.rust-lang.org/book/ch01-01-installation.html)
