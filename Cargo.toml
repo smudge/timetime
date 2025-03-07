@@ -10,6 +10,6 @@ version = "0.1.0"
 
 [dependencies]
 getopts = "0.2"
-ring = "0.16"
+ring = "0.17"
 filetime = "0.2"
 data-encoding = "2.3"
