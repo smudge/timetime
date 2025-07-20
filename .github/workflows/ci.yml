@@ -1,0 +1,15 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-rust@v1
+        with:
+          rust-version: stable
+      - run: cargo test --verbose

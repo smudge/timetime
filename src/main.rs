@@ -135,3 +135,141 @@ fn sha256_digest<R: Read>(mut reader: R) -> io::Result<Digest> {
 
     Ok(context.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+    use std::time::{Duration, SystemTime};
+    use tempfile::NamedTempFile;
+
+    fn secs(st: SystemTime) -> u64 {
+        st.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()
+    }
+
+    fn create_file_with_mtime(secs: i64) -> NamedTempFile {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "data").unwrap();
+        let ft = FileTime::from_unix_time(secs, 0);
+        filetime::set_file_mtime(f.path(), ft).unwrap();
+        f
+    }
+
+    #[test]
+    fn sha256_digest_known_value() {
+        let digest = sha256_digest(Cursor::new(b"abc")).unwrap();
+        assert_eq!(
+            HEXLOWER.encode(digest.as_ref()),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn checksum_file() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "hello").unwrap();
+        file.flush().unwrap();
+        assert_eq!(
+            checksum(file.path()),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn tz_check_detects_exact_hour() {
+        let base = SystemTime::UNIX_EPOCH;
+        let times = vec![base, base + Duration::from_secs(3600)];
+        assert!(tz_check(&times));
+    }
+
+    #[test]
+    fn tz_check_non_hour_delta() {
+        let base = SystemTime::UNIX_EPOCH;
+        let times = vec![base, base + Duration::from_secs(3599)];
+        assert!(!tz_check(&times));
+    }
+
+    #[test]
+    fn canonical_time_oldest_and_newest() {
+        let f1 = create_file_with_mtime(1000);
+        let f2 = create_file_with_mtime(2000);
+        let meta = vec![
+            fs::metadata(f1.path()).unwrap(),
+            fs::metadata(f2.path()).unwrap(),
+        ];
+
+        let oldest = get_canonical_time(&meta, false, None, |m| m.modified());
+        assert_eq!(oldest.unix_seconds(), 1000);
+
+        let newest = get_canonical_time(&meta, false, Some("newest".into()), |m| m.modified());
+        assert_eq!(newest.unix_seconds(), 2000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn canonical_time_tz_safety_panics() {
+        let f1 = create_file_with_mtime(1000);
+        let f2 = create_file_with_mtime(4600); // exactly one hour later
+        let meta = vec![
+            fs::metadata(f1.path()).unwrap(),
+            fs::metadata(f2.path()).unwrap(),
+        ];
+        get_canonical_time(&meta, true, None, |m| m.modified());
+    }
+
+    #[test]
+    fn run_updates_to_oldest() {
+        let f1 = create_file_with_mtime(1000);
+        let f2 = create_file_with_mtime(2000);
+        let p1 = f1.path().to_str().unwrap().to_string();
+        let p2 = f2.path().to_str().unwrap().to_string();
+
+        run(vec![p1.clone(), p2.clone()], None, true, false, false);
+
+        let m1 = fs::metadata(&p1).unwrap().modified().unwrap();
+        let m2 = fs::metadata(&p2).unwrap().modified().unwrap();
+        assert_eq!(secs(m1), 1000);
+        assert_eq!(secs(m1), secs(m2));
+    }
+
+    #[test]
+    fn run_checksum_mismatch_no_force() {
+        let f1 = create_file_with_mtime(1000);
+        let f2 = create_file_with_mtime(2000);
+        fs::write(f2.path(), b"other").unwrap();
+        let ft = FileTime::from_unix_time(2000, 0);
+        filetime::set_file_mtime(f2.path(), ft).unwrap();
+
+        let p1 = f1.path().to_str().unwrap().to_string();
+        let p2 = f2.path().to_str().unwrap().to_string();
+        let before = fs::metadata(&p1).unwrap().modified().unwrap();
+
+        run(vec![p1.clone(), p2.clone()], None, true, false, false);
+
+        let after = fs::metadata(&p1).unwrap().modified().unwrap();
+        assert_eq!(secs(before), secs(after));
+    }
+
+    #[test]
+    fn run_force_updates_with_mismatch() {
+        let f1 = create_file_with_mtime(1000);
+        let f2 = create_file_with_mtime(2000);
+        fs::write(f2.path(), b"other").unwrap();
+
+        let p1 = f1.path().to_str().unwrap().to_string();
+        let p2 = f2.path().to_str().unwrap().to_string();
+
+        run(
+            vec![p1.clone(), p2.clone()],
+            Some("newest".into()),
+            true,
+            true,
+            false,
+        );
+
+        let m1 = fs::metadata(&p1).unwrap().modified().unwrap();
+        let m2 = fs::metadata(&p2).unwrap().modified().unwrap();
+        assert_eq!(secs(m1), secs(m2));
+        assert!(secs(m1) >= 2000);
+    }
+}
