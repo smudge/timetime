@@ -63,60 +63,75 @@ fn main() {
     }
 }
 
-fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) -> Result<(), &'static str> {
-    let paths: Vec<PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
-    let checksums_match = force || {
-        let first = checksum(&paths[0]);
-        paths.iter().skip(1).all(|path| checksum(path) == first)
-    };
-    if !checksums_match {
-        return Err("File checksums do not match! Cancelling operation...");
-    } else {
-        let metadata: Vec<Metadata> = paths
-            .iter()
-            .map(|path| fs::metadata(path).unwrap())
-            .collect();
-        let modified = get_canonical_time(&metadata, tzsafety, strategy.clone(), |m| m.modified());
-        if !mtime {
-            let created = get_canonical_time(&metadata, tzsafety, strategy, |m| m.created());
-            if created > modified {
-                panic!("Canonical creation time cannot be after modified time");
-            }
-            for path in paths.iter() {
-                filetime::set_file_mtime(&path, created).unwrap(); // Setting mtime to created will update btime so that btime <= mtime
+fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) -> Result<(), String> {
+    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+    if !force {
+        let first = checksum(&paths[0])
+            .map_err(|e| format!("Cannot read '{}': {}", paths[0].display(), e))?;
+        for path in paths.iter().skip(1) {
+            let digest = checksum(path)
+                .map_err(|e| format!("Cannot read '{}': {}", path.display(), e))?;
+            if digest != first {
+                return Err("File checksums do not match! Cancelling operation...".into());
             }
         }
+    }
 
-        for path in paths.iter() {
-            filetime::set_file_mtime(&path, modified).unwrap();
+    let metadata: Vec<Metadata> = paths
+        .iter()
+        .map(|path| {
+            fs::metadata(path)
+                .map_err(|e| format!("Cannot read metadata for '{}': {}", path.display(), e))
+        })
+        .collect::<Result<_, _>>()?;
+    let modified = get_canonical_time(&metadata, &paths, tzsafety, strategy.as_deref(), |m| m.modified())?;
+    if !mtime {
+        let created = get_canonical_time(&metadata, &paths, tzsafety, strategy.as_deref(), |m| m.created())?;
+        if created > modified {
+            return Err("Canonical creation time cannot be after modified time".into());
         }
+        for path in &paths {
+            filetime::set_file_mtime(path, created)
+                .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
+        }
+    }
+
+    for path in &paths {
+        filetime::set_file_mtime(path, modified)
+            .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
     }
     Ok(())
 }
 
 fn get_canonical_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
-    metadata: &Vec<Metadata>,
+    metadata: &[Metadata],
+    paths: &[PathBuf],
     tzsafety: bool,
-    strategy: Option<String>,
+    strategy: Option<&str>,
     f: F,
-) -> FileTime {
+) -> Result<FileTime, String> {
     let times = metadata
         .iter()
-        .map(|m| f(m).unwrap())
-        .collect::<Vec<SystemTime>>();
+        .zip(paths)
+        .map(|(m, path)| {
+            f(m).map_err(|e| format!("Cannot read timestamp for '{}': {}", path.display(), e))
+        })
+        .collect::<Result<Vec<SystemTime>, _>>()?;
+
     if tz_check(&times) {
         if tzsafety {
-            panic!("Timezone Safety Check Failed! Files may have matching timestamps from different timezones.")
-        } else {
-            eprintln!("Warning: files may have matching timestamps from different timezones");
+            return Err("Timezone Safety Check Failed! Files may have matching timestamps from different timezones.".into());
         }
+        eprintln!("Warning: files may have matching timestamps from different timezones");
     }
+
     match strategy {
-        Some(w) if w == "newest".to_string() => {
-            FileTime::from_system_time(times.iter().max().unwrap().clone())
-        }
-        _ => FileTime::from_system_time(times.iter().min().unwrap().clone()),
+        Some("newest") => times.iter().max(),
+        _ => times.iter().min(),
     }
+    .copied()
+    .map(FileTime::from_system_time)
+    .ok_or_else(|| "No file timestamps were available".to_string())
 }
 
 fn tz_check(times: &Vec<SystemTime>) -> bool {
@@ -133,11 +148,11 @@ fn tz_check(times: &Vec<SystemTime>) -> bool {
     deltas.any(|dur| dur.as_secs() > 0 && dur.subsec_nanos() == 0 && dur.as_secs() % 3600 == 0)
 }
 
-fn checksum(path: &Path) -> String {
-    let file = File::open(path).unwrap();
+fn checksum(path: &Path) -> io::Result<String> {
+    let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let digest = sha256_digest(reader).unwrap();
-    HEXLOWER.encode(digest.as_ref())
+    let digest = sha256_digest(reader)?;
+    Ok(HEXLOWER.encode(digest.as_ref()))
 }
 
 fn sha256_digest<R: Read>(mut reader: R) -> io::Result<Digest> {
@@ -189,7 +204,7 @@ mod tests {
         write!(file, "hello").unwrap();
         file.flush().unwrap();
         assert_eq!(
-            checksum(file.path()),
+            checksum(file.path()).unwrap(),
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
     }
@@ -231,23 +246,25 @@ mod tests {
             fs::metadata(f2.path()).unwrap(),
         ];
 
-        let oldest = get_canonical_time(&meta, false, None, |m| m.modified());
+        let paths = vec![f1.path().to_path_buf(), f2.path().to_path_buf()];
+        let oldest = get_canonical_time(&meta, &paths, false, None, |m| m.modified()).unwrap();
         assert_eq!(oldest.unix_seconds(), 1000);
 
-        let newest = get_canonical_time(&meta, false, Some("newest".into()), |m| m.modified());
+        let newest = get_canonical_time(&meta, &paths, false, Some("newest"), |m| m.modified()).unwrap();
         assert_eq!(newest.unix_seconds(), 2000);
     }
 
     #[test]
-    #[should_panic(expected = "Timezone Safety Check Failed")]
-    fn canonical_time_tz_safety_panics() {
+    fn canonical_time_tz_safety_returns_error() {
         let f1 = create_file_with_mtime(1000);
         let f2 = create_file_with_mtime(4600); // exactly one hour later
         let meta = vec![
             fs::metadata(f1.path()).unwrap(),
             fs::metadata(f2.path()).unwrap(),
         ];
-        get_canonical_time(&meta, true, None, |m| m.modified());
+        let paths = vec![f1.path().to_path_buf(), f2.path().to_path_buf()];
+        let error = get_canonical_time(&meta, &paths, true, None, |m| m.modified()).unwrap_err();
+        assert!(error.contains("Timezone Safety Check Failed"));
     }
 
     #[test]
