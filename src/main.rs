@@ -42,6 +42,12 @@ fn main() {
         matches.opt_present("f"),
         matches.opt_present("h"),
     ) {
+        (Some(_), Some(_), Some(ref strategy), _, _, _, false)
+            if !matches!(strategy.as_str(), "oldest" | "newest") =>
+        {
+            eprintln!("Invalid strategy '{}': expected oldest or newest", strategy);
+            std::process::exit(2);
+        }
         (Some(_), Some(_), s, m, t, f, false) => {
             if let Err(error) = run(matches.free, s, m, f, t) {
                 eprintln!("{}", error);
