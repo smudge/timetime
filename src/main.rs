@@ -42,6 +42,11 @@ fn main() {
         matches.opt_present("f"),
         matches.opt_present("h"),
     ) {
+        (_, _, _, _, _, _, true) => print_usage(opts),
+        (_, None, _, _, _, _, false) => {
+            eprintln!("At least two file paths are required");
+            std::process::exit(2);
+        }
         (Some(_), Some(_), Some(ref strategy), _, _, _, false)
             if !matches!(strategy.as_str(), "oldest" | "newest") =>
         {
