@@ -183,9 +183,23 @@ mod tests {
     }
 
     #[test]
+    fn tz_check_detects_multiple_hours_but_not_identical_times() {
+        let base = SystemTime::UNIX_EPOCH;
+        assert!(tz_check(&vec![base, base + Duration::from_secs(7200)]));
+        assert!(!tz_check(&vec![base, base]));
+    }
+
+    #[test]
     fn tz_check_non_hour_delta() {
         let base = SystemTime::UNIX_EPOCH;
         let times = vec![base, base + Duration::from_secs(3599)];
+        assert!(!tz_check(&times));
+    }
+
+    #[test]
+    fn tz_check_ignores_fractional_hour_offsets() {
+        let base = SystemTime::UNIX_EPOCH;
+        let times = vec![base, base + Duration::from_secs(3600) + Duration::from_nanos(1)];
         assert!(!tz_check(&times));
     }
 
@@ -206,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Timezone Safety Check Failed")]
     fn canonical_time_tz_safety_panics() {
         let f1 = create_file_with_mtime(1000);
         let f2 = create_file_with_mtime(4600); // exactly one hour later
@@ -229,7 +243,7 @@ mod tests {
         let m1 = fs::metadata(&p1).unwrap().modified().unwrap();
         let m2 = fs::metadata(&p2).unwrap().modified().unwrap();
         assert_eq!(secs(m1), 1000);
-        assert_eq!(secs(m1), secs(m2));
+        assert_eq!(secs(m2), 1000);
     }
 
     #[test]
@@ -242,12 +256,15 @@ mod tests {
 
         let p1 = f1.path().to_str().unwrap().to_string();
         let p2 = f2.path().to_str().unwrap().to_string();
-        let before = fs::metadata(&p1).unwrap().modified().unwrap();
+        let before1 = fs::metadata(&p1).unwrap().modified().unwrap();
+        let before2 = fs::metadata(&p2).unwrap().modified().unwrap();
 
         run(vec![p1.clone(), p2.clone()], None, true, false, false);
 
-        let after = fs::metadata(&p1).unwrap().modified().unwrap();
-        assert_eq!(secs(before), secs(after));
+        let after1 = fs::metadata(&p1).unwrap().modified().unwrap();
+        let after2 = fs::metadata(&p2).unwrap().modified().unwrap();
+        assert_eq!(before1, after1);
+        assert_eq!(before2, after2);
     }
 
     #[test]
@@ -255,6 +272,7 @@ mod tests {
         let f1 = create_file_with_mtime(1000);
         let f2 = create_file_with_mtime(2000);
         fs::write(f2.path(), b"other").unwrap();
+        filetime::set_file_mtime(f2.path(), FileTime::from_unix_time(2000, 0)).unwrap();
 
         let p1 = f1.path().to_str().unwrap().to_string();
         let p2 = f2.path().to_str().unwrap().to_string();
@@ -269,7 +287,7 @@ mod tests {
 
         let m1 = fs::metadata(&p1).unwrap().modified().unwrap();
         let m2 = fs::metadata(&p2).unwrap().modified().unwrap();
-        assert_eq!(secs(m1), secs(m2));
-        assert!(secs(m1) >= 2000);
+        assert_eq!(secs(m1), 2000);
+        assert_eq!(secs(m2), 2000);
     }
 }
