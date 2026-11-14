@@ -54,9 +54,11 @@ fn main() {
 
 fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) -> Result<(), &'static str> {
     let paths: Vec<PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
-    let mut checksums: Vec<String> = paths.iter().map(|path| checksum(path.as_path())).collect();
-    checksums.dedup();
-    if checksums.len() != 1 && !force {
+    let checksums_match = force || {
+        let first = checksum(&paths[0]);
+        paths.iter().skip(1).all(|path| checksum(path) == first)
+    };
+    if !checksums_match {
         return Err("File checksums do not match! Cancelling operation...");
     } else {
         let metadata: Vec<Metadata> = paths
@@ -274,6 +276,47 @@ mod tests {
         let after2 = fs::metadata(&p2).unwrap().modified().unwrap();
         assert_eq!(before1, after1);
         assert_eq!(before2, after2);
+    }
+
+    #[test]
+    fn run_updates_three_identical_files() {
+        let files = [
+            create_file_with_mtime(1000),
+            create_file_with_mtime(2000),
+            create_file_with_mtime(3000),
+        ];
+        let paths: Vec<String> = files.iter()
+            .map(|f| f.path().to_str().unwrap().to_owned())
+            .collect();
+
+        run(paths.clone(), None, true, false, false).unwrap();
+
+        for path in paths {
+            assert_eq!(secs(fs::metadata(path).unwrap().modified().unwrap()), 1000);
+        }
+    }
+
+    #[test]
+    fn run_rejects_three_files_with_a_mismatched_middle_file() {
+        let files = [
+            create_file_with_mtime(1000),
+            create_file_with_mtime(2000),
+            create_file_with_mtime(3000),
+        ];
+        fs::write(files[1].path(), b"different").unwrap();
+        filetime::set_file_mtime(files[1].path(), FileTime::from_unix_time(2000, 0)).unwrap();
+        let paths: Vec<String> = files.iter()
+            .map(|f| f.path().to_str().unwrap().to_owned())
+            .collect();
+
+        assert_eq!(
+            run(paths.clone(), None, true, false, false).unwrap_err(),
+            "File checksums do not match! Cancelling operation..."
+        );
+
+        for (path, expected) in paths.iter().zip([1000, 2000, 3000]) {
+            assert_eq!(secs(fs::metadata(path).unwrap().modified().unwrap()), expected);
+        }
     }
 
     #[test]
