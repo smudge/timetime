@@ -108,16 +108,14 @@ fn run_with_mode(files: Vec<String>, strategy: Option<String>, mtime: bool, forc
         }
         return Ok(());
     }
-    if let Some(created) = plan.created {
-        for path in &paths {
+    for path in &paths {
+        if let Some(created) = plan.created {
             filetime::set_file_mtime(path, created)
                 .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
         }
-    }
-    for path in &paths {
         filetime::set_file_mtime(path, plan.modified)
             .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
-        // Stop at the first unverified update, rather than changing later files.
+        // Verify each file before proceeding to the next.
         verify_timestamps(path, &plan)?;
     }
     Ok(())
