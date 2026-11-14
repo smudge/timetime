@@ -113,3 +113,36 @@ fn help_succeeds_without_files() {
         assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
     }
 }
+
+#[test]
+fn unreadable_or_missing_file_reports_path_without_panicking() {
+    let first = NamedTempFile::new().unwrap();
+    let missing = first.path().with_extension("missing");
+    let output = Command::new(env!("CARGO_BIN_EXE_timetime"))
+        .arg("--mtime")
+        .args([first.path(), missing.as_path()])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(missing.to_str().unwrap()), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+#[test]
+fn force_still_reports_missing_file_metadata() {
+    let first = NamedTempFile::new().unwrap();
+    let missing = first.path().with_extension("missing");
+    let output = Command::new(env!("CARGO_BIN_EXE_timetime"))
+        .args(["--force", "--mtime"])
+        .args([first.path(), missing.as_path()])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Cannot read metadata"), "{stderr}");
+    assert!(stderr.contains(missing.to_str().unwrap()), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
