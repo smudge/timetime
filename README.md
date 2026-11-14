@@ -33,8 +33,23 @@ To compare only the "modified" timestamp, use the `--mtime` or `-m` flag:
 timetime --mtime file-1 file-2
 ```
 
-_Note that some filesystems will prevent a file's "created at" from being after
-its "modified at" by automatically setting `btime` to match `mtime`._
+_On some filesystems, setting modification time earlier than birth time also
+moves birth time backward. timetime intentionally uses that two-step behavior:
+set mtime to the target birth time, then restore the desired mtime._
+
+After applying changes, timetime now reads the file metadata back. An operation
+fails with a nonzero exit status when a requested creation or modification time
+was **not** preserved (compared to whole-second precision). A successful
+`set_file_mtime` call alone cannot prove birth time was changed. This is
+especially important when a caller will delete a duplicate after success.
+
+File systems that cannot change birth time may require `--mtime` to operate
+on modification times only. A `--dry-run` previews the requested values, not
+a guarantee that the filesystem can represent them.
+
+To characterize the filesystem where you are running timetime, use
+`cargo test filesystem_probe_characterizes_indirect_birth_time_changes -- --nocapture`
+and inspect the printed birth-time observations.
 
 #### Preview changes
 
