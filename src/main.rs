@@ -29,6 +29,7 @@ fn main() {
     opts.optflag("m", "mtime", "only compare 'modified' timestamp");
     opts.optflag("f", "force", "ignore checksum differences");
     opts.optflag("h", "help", "this help message");
+    opts.optflag("n", "dry-run", "show planned timestamps without changing files");
 
     let args: Vec<String> = env::args().collect();
     let matches = opts.parse(&args[1..]).unwrap();
@@ -41,29 +42,34 @@ fn main() {
         matches.opt_present("t"),
         matches.opt_present("f"),
         matches.opt_present("h"),
+        matches.opt_present("n"),
     ) {
-        (_, _, _, _, _, _, true) => print_usage(opts),
-        (_, None, _, _, _, _, false) => {
+        (_, _, _, _, _, _, true, _) => print_usage(opts),
+        (_, None, _, _, _, _, false, _) => {
             eprintln!("At least two file paths are required");
             std::process::exit(2);
         }
-        (Some(_), Some(_), Some(ref strategy), _, _, _, false)
+        (Some(_), Some(_), Some(ref strategy), _, _, _, false, _)
             if !matches!(strategy.as_str(), "oldest" | "newest") =>
         {
             eprintln!("Invalid strategy '{}': expected oldest or newest", strategy);
             std::process::exit(2);
         }
-        (Some(_), Some(_), s, m, t, f, false) => {
-            if let Err(error) = run(matches.free, s, m, f, t) {
+        (Some(_), Some(_), s, m, t, f, false, dry_run) => {
+            if let Err(error) = run_with_mode(matches.free, s, m, f, t, dry_run) {
                 eprintln!("{}", error);
                 std::process::exit(1);
             }
         },
-        (_, _, _, _, _, _, _) => print_usage(opts),
+        _ => print_usage(opts),
     }
 }
 
 fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) -> Result<(), String> {
+    run_with_mode(files, strategy, mtime, force, tzsafety, false)
+}
+
+fn run_with_mode(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool, dry_run: bool) -> Result<(), String> {
     let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     if !force {
         let first = checksum(&paths[0])
@@ -92,6 +98,15 @@ fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, t
     let plan = plan_timestamps(&modified_times, created_times.as_deref(), tzsafety, strategy.as_deref())?;
     if plan.timezone_warning {
         eprintln!("Warning: files may have matching timestamps from different timezones");
+    }
+    if dry_run {
+        for path in &paths {
+            match plan.created {
+                Some(created) => println!("{}: created={} modified={}", path.display(), created.unix_seconds(), plan.modified.unix_seconds()),
+                None => println!("{}: modified={}", path.display(), plan.modified.unix_seconds()),
+            }
+        }
+        return Ok(());
     }
     if let Some(created) = plan.created {
         for path in &paths {
