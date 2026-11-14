@@ -13,3 +13,6 @@ getopts = "0.2"
 ring = "0.17"
 filetime = "0.2"
 data-encoding = "2.3"
+
+[dev-dependencies]
+tempfile = "3"
