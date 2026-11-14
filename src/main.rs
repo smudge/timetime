@@ -84,58 +84,80 @@ fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, t
                 .map_err(|e| format!("Cannot read metadata for '{}': {}", path.display(), e))
         })
         .collect::<Result<_, _>>()?;
-    let modified = get_canonical_time(&metadata, &paths, tzsafety, strategy.as_deref(), |m| m.modified())?;
-    if !mtime {
-        let created = get_canonical_time(&metadata, &paths, tzsafety, strategy.as_deref(), |m| m.created())?;
-        if created > modified {
-            return Err("Canonical creation time cannot be after modified time".into());
-        }
+    let modified_times = read_times(&metadata, &paths, |m| m.modified())?;
+    let created_times = match mtime {
+        true => None,
+        false => Some(read_times(&metadata, &paths, |m| m.created())?),
+    };
+    let plan = plan_timestamps(&modified_times, created_times.as_deref(), tzsafety, strategy.as_deref())?;
+    if plan.timezone_warning {
+        eprintln!("Warning: files may have matching timestamps from different timezones");
+    }
+    if let Some(created) = plan.created {
         for path in &paths {
             filetime::set_file_mtime(path, created)
                 .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
         }
     }
-
     for path in &paths {
-        filetime::set_file_mtime(path, modified)
+        filetime::set_file_mtime(path, plan.modified)
             .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
     }
     Ok(())
 }
 
-fn get_canonical_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
-    metadata: &[Metadata],
-    paths: &[PathBuf],
-    tzsafety: bool,
-    strategy: Option<&str>,
-    f: F,
-) -> Result<FileTime, String> {
-    let times = metadata
-        .iter()
-        .zip(paths)
-        .map(|(m, path)| {
-            f(m).map_err(|e| format!("Cannot read timestamp for '{}': {}", path.display(), e))
-        })
-        .collect::<Result<Vec<SystemTime>, _>>()?;
-
-    if tz_check(&times) {
-        if tzsafety {
-            return Err("Timezone Safety Check Failed! Files may have matching timestamps from different timezones.".into());
-        }
-        eprintln!("Warning: files may have matching timestamps from different timezones");
-    }
-
-    match strategy {
-        Some("newest") => times.iter().max(),
-        _ => times.iter().min(),
-    }
-    .copied()
-    .map(FileTime::from_system_time)
-    .ok_or_else(|| "No file timestamps were available".to_string())
+#[derive(Debug, PartialEq, Eq)]
+struct TimestampPlan {
+    modified: FileTime,
+    created: Option<FileTime>,
+    timezone_warning: bool,
 }
 
-fn tz_check(times: &Vec<SystemTime>) -> bool {
-    let mut times = times.clone();
+fn read_times<F: Fn(&Metadata) -> io::Result<SystemTime>>(
+    metadata: &[Metadata], paths: &[PathBuf], read: F,
+) -> Result<Vec<SystemTime>, String> {
+    metadata.iter().zip(paths).map(|(m, path)| {
+        read(m).map_err(|e| format!("Cannot read timestamp for '{}': {}", path.display(), e))
+    }).collect()
+}
+
+fn plan_timestamps(
+    modified: &[SystemTime], created: Option<&[SystemTime]>,
+    tzsafety: bool, strategy: Option<&str>,
+) -> Result<TimestampPlan, String> {
+    fn choose(times: &[SystemTime], strategy: Option<&str>) -> Result<FileTime, String> {
+        match strategy {
+            Some("newest") => times.iter().max(),
+            _ => times.iter().min(),
+        }.copied()
+         .map(FileTime::from_system_time)
+         .ok_or_else(|| "No file timestamps were available".to_string())
+    }
+
+    let warning = tz_check(modified) || created.is_some_and(tz_check);
+    if tzsafety && warning {
+        return Err("Timezone Safety Check Failed! Files may have matching timestamps from different timezones.".into());
+    }
+
+    let modified_time = choose(modified, strategy)?;
+    let created_time = created.map(|times| choose(times, strategy)).transpose()?;
+    if created_time.is_some_and(|created| created > modified_time) {
+        return Err("Canonical creation time cannot be after modified time".into());
+    }
+
+    Ok(TimestampPlan {
+        modified: modified_time,
+        created: created_time,
+        timezone_warning: warning,
+    })
+}
+
+fn tz_check(times: &[SystemTime]) -> bool {
+    match times {
+        [] | [_] => return false,
+        _ => {}
+    }
+    let mut times = times.to_vec();
     times.sort();
     let mut left = times.clone();
     let mut right = times.clone();
@@ -238,33 +260,48 @@ mod tests {
     }
 
     #[test]
-    fn canonical_time_oldest_and_newest() {
-        let f1 = create_file_with_mtime(1000);
-        let f2 = create_file_with_mtime(2000);
-        let meta = vec![
-            fs::metadata(f1.path()).unwrap(),
-            fs::metadata(f2.path()).unwrap(),
-        ];
-
-        let paths = vec![f1.path().to_path_buf(), f2.path().to_path_buf()];
-        let oldest = get_canonical_time(&meta, &paths, false, None, |m| m.modified()).unwrap();
-        assert_eq!(oldest.unix_seconds(), 1000);
-
-        let newest = get_canonical_time(&meta, &paths, false, Some("newest"), |m| m.modified()).unwrap();
-        assert_eq!(newest.unix_seconds(), 2000);
+    fn plans_oldest_and_newest_without_file_access() {
+        let base = SystemTime::UNIX_EPOCH;
+        let modified = [base + Duration::from_secs(1000), base + Duration::from_secs(2000)];
+        let oldest = plan_timestamps(&modified, None, false, None).unwrap();
+        let newest = plan_timestamps(&modified, None, false, Some("newest")).unwrap();
+        assert_eq!(oldest.modified.unix_seconds(), 1000);
+        assert_eq!(newest.modified.unix_seconds(), 2000);
+        assert_eq!(oldest.created, None);
+        assert!(!oldest.timezone_warning);
     }
 
     #[test]
-    fn canonical_time_tz_safety_returns_error() {
-        let f1 = create_file_with_mtime(1000);
-        let f2 = create_file_with_mtime(4600); // exactly one hour later
-        let meta = vec![
-            fs::metadata(f1.path()).unwrap(),
-            fs::metadata(f2.path()).unwrap(),
-        ];
-        let paths = vec![f1.path().to_path_buf(), f2.path().to_path_buf()];
-        let error = get_canonical_time(&meta, &paths, true, None, |m| m.modified()).unwrap_err();
-        assert!(error.contains("Timezone Safety Check Failed"));
+    fn plans_creation_and_modification_together() {
+        let base = SystemTime::UNIX_EPOCH;
+        let modified = [base + Duration::from_secs(1200), base + Duration::from_secs(2400)];
+        let created = [base + Duration::from_secs(900), base + Duration::from_secs(1800)];
+        let plan = plan_timestamps(&modified, Some(&created), false, None).unwrap();
+        assert_eq!(plan.modified.unix_seconds(), 1200);
+        assert_eq!(plan.created.unwrap().unix_seconds(), 900);
+    }
+
+    #[test]
+    fn rejects_inverted_creation_time() {
+        let base = SystemTime::UNIX_EPOCH;
+        assert!(plan_timestamps(
+            &[base + Duration::from_secs(1000)],
+            Some(&[base + Duration::from_secs(2000)]), false, None,
+        ).unwrap_err().contains("creation time"));
+    }
+
+    #[test]
+    fn planning_enforces_timezone_safety() {
+        let base = SystemTime::UNIX_EPOCH;
+        let modified = [base, base + Duration::from_secs(3600)];
+        assert!(plan_timestamps(&modified, None, false, None).unwrap().timezone_warning);
+        assert!(plan_timestamps(&modified, None, true, None)
+            .unwrap_err().contains("Timezone Safety Check Failed"));
+    }
+
+    #[test]
+    fn planning_requires_timestamps() {
+        assert!(plan_timestamps(&[], None, false, None).is_err());
     }
 
     #[test]
