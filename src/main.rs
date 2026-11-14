@@ -152,8 +152,8 @@ fn plan_timestamps(
     })
 }
 
-fn tz_check(times: &Vec<SystemTime>) -> bool {
-    let mut times = times.clone();
+fn tz_check(times: &[SystemTime]) -> bool {
+    let mut times = times.to_vec();
     times.sort();
     let mut left = times.clone();
     let mut right = times.clone();
