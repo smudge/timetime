@@ -42,17 +42,22 @@ fn main() {
         matches.opt_present("f"),
         matches.opt_present("h"),
     ) {
-        (Some(_), Some(_), s, m, t, f, false) => run(matches.free, s, m, f, t),
+        (Some(_), Some(_), s, m, t, f, false) => {
+            if let Err(error) = run(matches.free, s, m, f, t) {
+                eprintln!("{}", error);
+                std::process::exit(1);
+            }
+        },
         (_, _, _, _, _, _, _) => print_usage(opts),
     }
 }
 
-fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) {
+fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, tzsafety: bool) -> Result<(), &'static str> {
     let paths: Vec<PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
     let mut checksums: Vec<String> = paths.iter().map(|path| checksum(path.as_path())).collect();
     checksums.dedup();
     if checksums.len() != 1 && !force {
-        eprintln!("File checksums do not match! Cancelling operation...");
+        return Err("File checksums do not match! Cancelling operation...");
     } else {
         let metadata: Vec<Metadata> = paths
             .iter()
@@ -73,6 +78,7 @@ fn run(files: Vec<String>, strategy: Option<String>, mtime: bool, force: bool, t
             filetime::set_file_mtime(&path, modified).unwrap();
         }
     }
+    Ok(())
 }
 
 fn get_canonical_time<F: Fn(&Metadata) -> io::Result<SystemTime>>(
@@ -238,7 +244,7 @@ mod tests {
         let p1 = f1.path().to_str().unwrap().to_string();
         let p2 = f2.path().to_str().unwrap().to_string();
 
-        run(vec![p1.clone(), p2.clone()], None, true, false, false);
+        run(vec![p1.clone(), p2.clone()], None, true, false, false).unwrap();
 
         let m1 = fs::metadata(&p1).unwrap().modified().unwrap();
         let m2 = fs::metadata(&p2).unwrap().modified().unwrap();
@@ -259,7 +265,10 @@ mod tests {
         let before1 = fs::metadata(&p1).unwrap().modified().unwrap();
         let before2 = fs::metadata(&p2).unwrap().modified().unwrap();
 
-        run(vec![p1.clone(), p2.clone()], None, true, false, false);
+        assert_eq!(
+            run(vec![p1.clone(), p2.clone()], None, true, false, false).unwrap_err(),
+            "File checksums do not match! Cancelling operation..."
+        );
 
         let after1 = fs::metadata(&p1).unwrap().modified().unwrap();
         let after2 = fs::metadata(&p2).unwrap().modified().unwrap();
@@ -283,7 +292,7 @@ mod tests {
             true,
             true,
             false,
-        );
+        ).unwrap();
 
         let m1 = fs::metadata(&p1).unwrap().modified().unwrap();
         let m2 = fs::metadata(&p2).unwrap().modified().unwrap();
