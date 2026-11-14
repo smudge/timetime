@@ -84,3 +84,32 @@ fn invalid_strategy_never_modifies_existing_files_even_with_force() {
         std::time::UNIX_EPOCH + std::time::Duration::from_secs(2000)
     );
 }
+
+#[test]
+fn missing_files_fail_with_nonzero_status() {
+    for paths in [&[][..], &["only-one-file"][..]] {
+        let output = Command::new(env!("CARGO_BIN_EXE_timetime"))
+            .args(["--mtime"])
+            .args(paths)
+            .output()
+            .unwrap();
+
+        assert_eq!(output.status.code(), Some(2), "{paths:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("At least two file paths"),
+            "{paths:?}"
+        );
+    }
+}
+
+#[test]
+fn help_succeeds_without_files() {
+    for args in [&["--help"][..], &["--help", "only-one-file"][..]] {
+        let output = Command::new(env!("CARGO_BIN_EXE_timetime"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+    }
+}
