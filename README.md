@@ -36,6 +36,16 @@ timetime --mtime file-1 file-2
 _Note that some filesystems will prevent a file's "created at" from being after
 its "modified at" by automatically setting `btime` to match `mtime`._
 
+#### Preview changes
+
+Use `--dry-run` or `-n` to preview the chosen timestamps without changing any files. Checksums and safety checks still run.
+
+```bash
+timetime --mtime --dry-run file-1 file-2
+```
+
+The preview prints each file path and the planned Unix timestamp in seconds.
+
 #### Comparison strategy
 
 When supplied with multiple files, `timetime` can be configured to use the

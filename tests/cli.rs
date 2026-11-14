@@ -146,3 +146,45 @@ fn force_still_reports_missing_file_metadata() {
     assert!(stderr.contains(missing.to_str().unwrap()), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
+
+#[test]
+fn dry_run_prints_plan_without_modifying_files() {
+    let first = NamedTempFile::new().unwrap();
+    let second = NamedTempFile::new().unwrap();
+    fs::write(first.path(), b"same").unwrap();
+    fs::write(second.path(), b"same").unwrap();
+    set_file_mtime(first.path(), FileTime::from_unix_time(1000, 0)).unwrap();
+    set_file_mtime(second.path(), FileTime::from_unix_time(2000, 0)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_timetime"))
+        .args(["--mtime", "--dry-run"])
+        .args([first.path(), second.path()])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(first.path().to_str().unwrap()));
+    assert!(stdout.contains(second.path().to_str().unwrap()));
+    assert!(stdout.contains("modified=1000"));
+    assert_eq!(fs::metadata(first.path()).unwrap().modified().unwrap(), std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000));
+    assert_eq!(fs::metadata(second.path()).unwrap().modified().unwrap(), std::time::UNIX_EPOCH + std::time::Duration::from_secs(2000));
+}
+
+#[test]
+fn dry_run_still_rejects_mismatched_contents() {
+    let first = NamedTempFile::new().unwrap();
+    let second = NamedTempFile::new().unwrap();
+    fs::write(first.path(), b"first").unwrap();
+    fs::write(second.path(), b"second").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_timetime"))
+        .args(["--mtime", "-n"])
+        .args([first.path(), second.path()])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("File checksums do not match"));
+    assert!(output.stdout.is_empty());
+}
