@@ -153,6 +153,10 @@ fn plan_timestamps(
 }
 
 fn tz_check(times: &[SystemTime]) -> bool {
+    match times {
+        [] | [_] => return false,
+        _ => {}
+    }
     let mut times = times.to_vec();
     times.sort();
     let mut left = times.clone();
