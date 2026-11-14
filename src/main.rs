@@ -118,7 +118,45 @@ fn run_with_mode(files: Vec<String>, strategy: Option<String>, mtime: bool, forc
         filetime::set_file_mtime(path, plan.modified)
             .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
     }
+    // A successful mtime write does not imply btime was changed on this filesystem.
+    // Do not allow callers (such as rmlint) to delete a duplicate on that assumption.
+    for path in &paths {
+        verify_timestamps(path, &plan)?;
+    }
     Ok(())
+}
+
+// Compare whole seconds, the precision used by the CLI preview. A filesystem
+// with coarser precision fails verification instead of falsely claiming success.
+fn verify_timestamp(
+    path: &Path,
+    field: &str,
+    expected: FileTime,
+    observed: io::Result<SystemTime>,
+) -> Result<(), String> {
+    let observed = observed
+        .map_err(|e| format!("Cannot verify {} for '{}': {}", field, path.display(), e))?;
+    let actual = FileTime::from_system_time(observed);
+    match expected.unix_seconds() == actual.unix_seconds() {
+        true => Ok(()),
+        false => Err(format!(
+            "{} not preserved for '{}': expected {}, found {} (filesystem may not support this update)",
+            field,
+            path.display(),
+            expected.unix_seconds(),
+            actual.unix_seconds()
+        )),
+    }
+}
+
+fn verify_timestamps(path: &Path, plan: &TimestampPlan) -> Result<(), String> {
+    let metadata = fs::metadata(path)
+        .map_err(|e| format!("Cannot verify '{}': {}", path.display(), e))?;
+    verify_timestamp(path, "Modification time", plan.modified, metadata.modified())?;
+    match plan.created {
+        Some(created) => verify_timestamp(path, "Creation time", created, metadata.created()),
+        None => Ok(()),
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -317,6 +355,41 @@ mod tests {
     #[test]
     fn planning_requires_timestamps() {
         assert!(plan_timestamps(&[], None, false, None).is_err());
+    }
+
+    #[test]
+    fn verification_checks_birth_time_as_well_as_mtime() {
+        let path = Path::new("example");
+        let expected = FileTime::from_unix_time(1000, 0);
+        let actual = SystemTime::UNIX_EPOCH + Duration::from_secs(2000);
+        let mismatch = verify_timestamp(path, "Creation time", expected, Ok(actual)).unwrap_err();
+        assert!(mismatch.contains("Creation time not preserved"));
+        assert!(mismatch.contains("example"));
+        assert!(verify_timestamp(path, "Modification time", expected,
+            Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(1000))).is_ok());
+    }
+
+    #[test]
+    fn filesystem_probe_characterizes_indirect_birth_time_changes() {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path();
+        let original_birth = fs::metadata(path).unwrap().created();
+        let early = SystemTime::now() - Duration::from_secs(7 * 24 * 3600);
+        let later = early + Duration::from_secs(3600);
+
+        filetime::set_file_mtime(path, FileTime::from_system_time(early)).unwrap();
+        let after_early = fs::metadata(path).unwrap().created();
+        filetime::set_file_mtime(path, FileTime::from_system_time(later)).unwrap();
+        let after_restore = fs::metadata(path).unwrap();
+        verify_timestamp(path, "Modification time",
+            FileTime::from_system_time(later), after_restore.modified()).unwrap();
+
+        eprintln!(
+            "filesystem birth-time probe: original={:?}, after mtime backdate={:?}, after restoring mtime={:?}",
+            original_birth, after_early, after_restore.created()
+        );
+        // Some filesystems adjust btime with mtime, others don't. Record the
+        // observed behavior without assuming the test runner's filesystem.
     }
 
     #[test]

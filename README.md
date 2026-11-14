@@ -35,6 +35,8 @@ timetime --mtime file-1 file-2
 
 _Note that some filesystems will prevent a file's "created at" from being after
 its "modified at" by automatically setting `btime` to match `mtime`._
+If creation time cannot be preserved, `timetime` reports an error;
+use `--mtime` to update modification time only.
 
 #### Preview changes
 
@@ -45,6 +47,8 @@ timetime --mtime --dry-run file-1 file-2
 ```
 
 The preview prints each file path and the planned Unix timestamp in seconds.
+
+A dry run is a preview, not a guarantee that the filesystem can apply the changes.
 
 #### Comparison strategy
 
