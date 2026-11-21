@@ -108,19 +108,14 @@ fn run_with_mode(files: Vec<String>, strategy: Option<String>, mtime: bool, forc
         }
         return Ok(());
     }
-    if let Some(created) = plan.created {
-        for path in &paths {
+    for path in &paths {
+        if let Some(created) = plan.created {
             filetime::set_file_mtime(path, created)
                 .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
         }
-    }
-    for path in &paths {
         filetime::set_file_mtime(path, plan.modified)
             .map_err(|e| format!("Cannot set timestamp for '{}': {}", path.display(), e))?;
-    }
-    // A successful mtime write does not imply btime was changed on this filesystem.
-    // Do not allow callers (such as rmlint) to delete a duplicate on that assumption.
-    for path in &paths {
+        // Verify each file before proceeding to the next.
         verify_timestamps(path, &plan)?;
     }
     Ok(())
