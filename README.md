@@ -1,5 +1,8 @@
 # timetime
 
+[![CI](https://github.com/smudge/timetime/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smudge/timetime/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/crates/d/timetime)](https://crates.io/crates/timetime)
+
 > A CLI for repairing timestamp metadata of file copies 🕛🕧🕐🕜🕑🕝🕒
 
 ## Basic Usage
@@ -100,6 +103,12 @@ the original, _and then_ (only if that succeeds) remove the duplicate file.
 
 ## Installing
 
+### via prebuilt binaries
+
+Download the archive for your platform from the [latest GitHub release](https://github.com/smudge/timetime/releases/latest) (Apple Silicon: `aarch64-apple-darwin`; Intel Mac: `x86_64-apple-darwin`; Linux: `x86_64-unknown-linux-musl` or `aarch64-unknown-linux-musl`). Extract the archive and move `timetime` into your `PATH`.
+
+Linux archives contain statically linked binaries.
+
 ### via Cargo
 
 [Set up Rust/Cargo](https://doc.rust-lang.org/book/ch01-01-installation.html)
@@ -113,6 +122,10 @@ cargo install timetime
 
 * The maintainers of `rmlint` for such a reliable and well-documented project
 * Carol Nichols and Steve Klabnik for the [official book](https://doc.rust-lang.org/book/)
+
+## Releasing
+
+Bump the version in `Cargo.toml` and update `Cargo.lock`, then commit to `main`. Run `cargo release --dry-run` and `cargo release` locally to publish to crates.io and push the `v<version>` tag. GitHub Actions then builds release archives and creates a draft GitHub release with checksums; review and publish that draft separately.
 
 ## Contributing
 
